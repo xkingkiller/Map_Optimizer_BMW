@@ -1,0 +1,4 @@
+<?xml version="1.0" ?>
+<launch>
+	<node name="static_transform_publisher" pkg="tf2_ros" type="static_transform_publisher" args="28488 -78 0 0 0 0 1 map local_map_frame" />
+</launch>
