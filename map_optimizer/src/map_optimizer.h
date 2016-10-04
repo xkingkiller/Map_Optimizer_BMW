@@ -1,3 +1,5 @@
+#ifndef MAP_OPTIMIZER_H_
+#define MAP_OPTIMIZER_H_
 #include "ros/ros.h"
 
 #include "gmapping/gridfastslam/gridslamprocessor.h"
@@ -8,6 +10,8 @@
 #include "laser_geometry/laser_geometry.h"
 #include "map_optimizer_msg/OdomSelectList.h"
 #include "map_optimizer_msg/SelectMode.h"
+
+#include "graph_manager.h"
 
 #include <interactive_markers/interactive_marker_server.h>
 #include <interactive_markers/menu_handler.h>
@@ -36,6 +40,10 @@ class MapOptimizer
     TNode* node_;
     std::map< int, sensor_msgs::PointCloudPtr > scans_buf_;
     std::map< int, TNode* > node_map_;
+    std::map< int, double > node_time_buf_;
+    std::vector<int> id_buf_;
+    std::vector<int> const_id_buf_;
+    std::vector<int> ref_id_buf_;
     int totle_size_;
     //deal selection
     unsigned char sel_mode;
@@ -46,27 +54,40 @@ class MapOptimizer
     void processMarkerFeedback( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback );
     void updateTargetLaserPose(const tf::Transform& t, int ind);
     int target_pose_index_;
+    tf::Transform target_tf_;
     // menu handler
     interactive_markers::MenuHandler menu_handler_;
     interactive_markers::MenuHandler::EntryHandle h_mode_last_;
     interactive_markers::MenuHandler::EntryHandle h_mode_ref_laser_;
     interactive_markers::MenuHandler::EntryHandle h_mode_target_laser_;
+    interactive_markers::MenuHandler::EntryHandle h_mode_ref_opt_laser_;
 
     void initMenu(const tf::Transform& t);
     void menuModeCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
+    void menuAddConstCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
     void menuRefineCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
-    void menuGenMapCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
+    void menuExportOptPosesCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
     //
     ros::Publisher poses_pub;
     void publishPoses();
     ros::Publisher selected_scans_pub;
     ros::Publisher target_scan_pub;
-    sensor_msgs::PointCloudPtr createLaserScansMsg(const std::vector< int >& ids);
+    sensor_msgs::PointCloudPtr createLaserScansMsg(const std::vector< int >& ids, bool useOpt = false);
     //Handle for selection event
     ros::Subscriber odom_select_sub;
     void handleOdomSelect(const map_optimizer_msg::OdomSelectList::ConstPtr& msg);
     //
     laser_geometry::LaserProjection projector_;
-
+    //graph manager
+    boost::shared_ptr< GraphManager > graph_manager_;
+    void createGraph();
+    void addConstraint(const tf::Transform& newPose, int id);
+    void optimize();
+    int findNearestRefId(int tid);
+    ros::Publisher opt_poses_pub_;
+    void publishOptimizedPoses();
+    // export result
+    void exportOptPoses();
 
 };
+#endif //MAP_OPTIMIZER_H_
