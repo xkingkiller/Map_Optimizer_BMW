@@ -20,7 +20,7 @@ class GraphManager
 public:
 	struct OdomPose
 	{
-		EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+//		EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 		int id;
 		g2o::SE2 rawPose;
 		g2o::SE2 refinedPose;
@@ -34,7 +34,7 @@ public:
 	  g2o::SE2 rawTransf;
 	  g2o::SE2 refinedTransf;
 	  Eigen::Matrix3d information;
-	  EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+//	  EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 	};
 	typedef std::vector<PoseEdge, Eigen::aligned_allocator<PoseEdge> >  PoseEdgeVector;
 

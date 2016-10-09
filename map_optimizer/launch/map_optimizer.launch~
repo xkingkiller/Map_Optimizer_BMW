@@ -1,8 +1,0 @@
-<?xml version="1.0" ?>
-<launch>
-  <node name="map_optimizer" pkg="map_optimizer" type="map_optimizer" output="screen">
-    <param name="mapdata_folder" type="string" value="/media/tomas/HafData/MapData/AntingExtractedRawData/" />
-    <param name="baseFrame" type="string" value="map" />
-  </node>
-  <node name="static_transform_publisher" pkg="tf2_ros" type="static_transform_publisher" args="-22706 17205 0 0 0 0 1 map local_map_frame" />
-</launch>

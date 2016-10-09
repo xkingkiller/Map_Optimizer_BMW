@@ -2,8 +2,7 @@
 <launch>
   <node name="map_optimizer" pkg="map_optimizer" type="map_optimizer" output="screen">
     <param name="mapdata_folder" type="string" value="/media/tomas/HafData/MapData/AntingExtractedRawData/" />
-    <param name="poseFile" type="string" value="pose.csv" />
-    <param name="baseFrame" type="string" value="map" />
+    <param name="baseFrame" type="string" value="world" />
     <param name="fixedFrame" type="string" value="world" />
   </node>
   <node name="static_transform_publisher_map_optimizer" pkg="tf2_ros" type="static_transform_publisher" args="21629.7683712729 -16873.9641289994 0 0 0 0 1 local_map_frame map" />

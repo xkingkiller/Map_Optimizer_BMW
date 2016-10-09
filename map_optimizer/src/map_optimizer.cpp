@@ -50,11 +50,19 @@ MapOptimizer::~MapOptimizer() {
 }
 
 void MapOptimizer::init() {
-	if (!private_nh_.getParam(ros::this_node::getName() + "/mapdata_folder",
-			mapdata_folder_))
+	if (!private_nh_.getParam(ros::this_node::getName() + "/mapdata_folder", mapdata_folder_))
 		mapdata_folder_ = "";
-	if (!private_nh_.getParam("baseFrame", baseFrame_))
+
+	if (!private_nh_.getParam(ros::this_node::getName() + "/poseFile", poseFile_))
+		poseFile_ = "pose.csv";
+
+	if (!private_nh_.getParam(ros::this_node::getName() + "/baseFrame", baseFrame_))
 		baseFrame_ = "map";
+
+	if (!private_nh_.getParam(ros::this_node::getName() + "/fixedFrame", fixedFrame_))
+		fixedFrame_ = "world";
+
+	tflistener_.reset(new tf::TransformListener(private_nh_));
 
 	poses_pub = private_nh_.advertise<visualization_msgs::MarkerArray>(
 			"/map_optimizer/trajectory", 1, true); //publish latched trajectory
@@ -176,6 +184,8 @@ void MapOptimizer::initMenu(const tf::Transform& t)
 	h_mode_last_ = h_mode_ref_laser_;
 	// add button for add constraint
 	menu_handler_.insert("Add Constraint", [this] (const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback) {menuAddConstCB(feedback);} );
+	// add button for fixed constraint
+	menu_handler_.insert("Add Fixed Constraint", [this] (const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback) {menuAddFixedConstCB(feedback);} );
 	// add button for optimize
 	menu_handler_.insert("Optimize", [this] (const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback) {menuRefineCB(feedback);} );
 	menu_handler_.insert("Export Opt Poses", [this] (const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback) {menuExportOptPosesCB(feedback);} );
@@ -214,6 +224,11 @@ void MapOptimizer::menuModeCB(const visualization_msgs::InteractiveMarkerFeedbac
 void MapOptimizer::menuAddConstCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback)
 {
 	addConstraint(target_tf_, target_pose_index_);
+}
+
+void MapOptimizer::menuAddFixedConstCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback)
+{
+	addFixedConstraint(target_tf_, target_pose_index_);
 }
 
 void MapOptimizer::menuRefineCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback)
@@ -340,8 +355,7 @@ void MapOptimizer::loadMapData() {
 		pose.theta = std::stof(s);	// - 55 * M_PI / 180;
 
 		//pose_stream >> id >> bag_time >> weight >> gweight >> pose.x >> pose.y >> pose.theta;
-		ROS_INFO_STREAM(
-				"data: "<< id <<", " << bag_time<<", " << weight <<", " << gweight <<", [" << pose.x <<", " << pose.y <<", " << pose.theta<<"]");
+//		ROS_INFO_STREAM("data: "<< id <<", " << bag_time<<", " << weight <<", " << gweight <<", [" << pose.x <<", " << pose.y <<", " << pose.theta<<"]");
 		TNode* node = new TNode(pose, weight, parent);
 		//load scan for this node
 		std::string scan_file(
@@ -380,8 +394,17 @@ void MapOptimizer::exportOptPoses()
 			ROS_INFO("Empty map data folder!");
 			return;
 		}
+	tf::StampedTransform tf2FixFrame;
+	//find transformation from base frame to target frame.
+	try{
+		tflistener_->lookupTransform( fixedFrame_, baseFrame_, ros::Time(0), tf2FixFrame);
+	}catch (tf::TransformException ex){
+	    ROS_ERROR("%s - No transformation available",ex.what());
+	}
+
 	std::string pose_file(mapdata_folder_ + "/pose_opt.csv");
 	std::ofstream pose_stream(pose_file.c_str());
+	int i = 0;
 	for(auto id : id_buf_)
 	{
 		if (node_map_.find(id) == node_map_.end())
@@ -392,11 +415,19 @@ void MapOptimizer::exportOptPoses()
 		auto px = vert.refinedPose.translation().x();
 		auto py = vert.refinedPose.translation().y();
 		auto theta = vert.refinedPose.rotation().angle();
-		ROS_INFO("export 1: %d, %f\n", id, theta);
+
+		//transform pose
+		tf::Quaternion q;
+		q.setRPY(0.0, 0.0,theta);
+		tf::Transform tfPose(q, tf::Vector3(px, py, 0.0));
+		auto tfNew = tf2FixFrame * tfPose;
+		px = tfNew.getOrigin().getX();
+		py = tfNew.getOrigin().getY();
+		theta = tf::getYaw(tfNew.getRotation());
+
 		//export pcd index and reading time
 		pose_stream<<id;
 		pose_stream<<std::setprecision(15)<<", "<<node_time_buf_[id];
-		ROS_INFO("export 2: %f\n", node_time_buf_[id]);
 		//export weight
 		double w=n->weight;
 		double gw=n->gweight;
@@ -405,6 +436,12 @@ void MapOptimizer::exportOptPoses()
 		pose_stream<<", "<<px<<", "<<py<<", "<<theta;
 		//finish one line
 		pose_stream<<std::endl;
+
+		//print progress
+		auto prePecent = (i * 100 / id_buf_.size());
+		auto pecent = (++i * 100 / id_buf_.size());
+		if(prePecent != pecent && pecent % 10 == 0)
+			ROS_INFO_STREAM("Exporting: " << pecent<<"\%");
 	}
 	pose_stream.close();
 	ROS_INFO("Export optimized poses finished. ");
@@ -431,17 +468,11 @@ sensor_msgs::PointCloudPtr MapOptimizer::loadLaserScan(
 
 void MapOptimizer::createGraph()
 {
+	ROS_INFO("createGraph...");
 	graph_manager_.reset(new GraphManager);
 
 	GraphManager::OdomPose last_pose;
 	last_pose.id = -1;
-	//create information for odometry
-	Eigen::Matrix3d covariance;
-	covariance.fill(0.);
-	covariance(0, 0) = 1.0*1.0;//transNoise[0]*transNoise[0];
-	covariance(1, 1) = 1.0*1.0;//transNoise[1]*transNoise[1];
-	covariance(2, 2) = 0.5*0.5;//rotNoise*rotNoise;
-	Eigen::Matrix3d information = covariance.inverse();
 
 	//go through nodes and create graph
 	for(auto id : id_buf_)
@@ -460,9 +491,22 @@ void MapOptimizer::createGraph()
 			edge.from = last_pose.id;
 			edge.to = id;
 			edge.rawTransf = last_pose.rawPose.inverse() * pose.rawPose;
+
+			////create information for odometry
+			Eigen::Matrix3d covariance;
+			covariance.fill(0.);
+			auto cx = 0.1 * edge.rawTransf.translation().x(); //0.1m err per 1 m motion.
+			auto cy = 0.1 * edge.rawTransf.translation().y();
+			auto cr = 1.0 * edge.rawTransf.rotation().angle();
+			covariance(0, 0) = cx*cx;//transNoise[0]*transNoise[0];
+			covariance(1, 1) = cy*cy;//transNoise[1]*transNoise[1];
+			covariance(2, 2) = cr*cr;//rotNoise*rotNoise;
+			Eigen::Matrix3d information = covariance.inverse();
+			/////
+
 			edge.information = information;
 			graph_manager_->addEdge(edge);
-			ROS_INFO("Add Constraint: from %d to %d, T: [%f, %f, %f]\n", edge.from, edge.to, edge.rawTransf.translation().x(), edge.rawTransf.translation().y(), edge.rawTransf.rotation().angle());
+//			ROS_INFO("Add Constraint: from %d to %d, T: [%f, %f, %f]\n", edge.from, edge.to, edge.rawTransf.translation().x(), edge.rawTransf.translation().y(), edge.rawTransf.rotation().angle());
 		}
 		last_pose = pose;
 	}
@@ -554,9 +598,55 @@ void MapOptimizer::addConstraint(const tf::Transform& newPose, int id)
 	ROS_INFO("Add Constraint: from %d to %d, T: [%f, %f, %f]\n", id, newId, edge.rawTransf.translation().x(), edge.rawTransf.translation().y(), edge.rawTransf.rotation().angle());
 }
 
+
+void MapOptimizer::addFixedConstraint(const tf::Transform& newPose, int id)
+{
+	if (node_map_.find(id) == node_map_.end())
+			return;
+	// generate new id
+	int newId = -1;
+	if (const_id_buf_.size() > 0)
+		newId = const_id_buf_.back() + 1;
+	else
+	{
+		newId = id_buf_.size() + 1;
+	}
+	const_id_buf_.push_back(newId);
+	// add new vertex to graph
+	GraphManager::OdomPose pose;
+	pose.id = newId;
+	const auto& p = newPose.getOrigin();
+	pose.rawPose = g2o::SE2(p.getX(), p.getY(), tf::getYaw(newPose.getRotation()));
+	graph_manager_->addVertex(pose);
+
+	// create pre pose
+	GraphManager::OdomPose pre;
+	auto& n = node_map_[id];
+	pre.id = id;
+	pre.rawPose = g2o::SE2(n->pose.x, n->pose.y, n->pose.theta);
+
+	// create constraint information
+	Eigen::Matrix3d covariance;
+	covariance.fill(0.);
+	covariance(0, 0) = 0.01*0.01;//transNoise[0]*transNoise[0];
+	covariance(1, 1) = 0.01*0.01;//transNoise[1]*transNoise[1];
+	covariance(2, 2) = 0.01*0.01;//rotNoise*rotNoise;
+	Eigen::Matrix3d information = covariance.inverse();
+	// add edge
+	GraphManager::PoseEdge edge;
+	edge.from = id;
+	edge.to = newId;
+	edge.rawTransf = g2o::SE2(0.0, 0.0, 0.0);//pre.rawPose.inverse() * pose.rawPose;
+	edge.information = information;
+	graph_manager_->addEdge(edge);
+	ROS_INFO("Add Fixed Constraint: from %d to %d, T: [%f, %f, %f]\n", id, newId, edge.rawTransf.translation().x(), edge.rawTransf.translation().y(), edge.rawTransf.rotation().angle());
+	//set fixed
+	graph_manager_->setFixed(newId);
+}
+
 void MapOptimizer::optimize()
 {
-	graph_manager_->setFixed(id_buf_[0]);
+//	graph_manager_->setFixed(id_buf_[0]);
 	graph_manager_->optimize();
 }
 

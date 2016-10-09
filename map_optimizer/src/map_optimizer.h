@@ -1,6 +1,7 @@
 #ifndef MAP_OPTIMIZER_H_
 #define MAP_OPTIMIZER_H_
 #include "ros/ros.h"
+#include <tf/transform_listener.h>
 
 #include "gmapping/gridfastslam/gridslamprocessor.h"
 
@@ -35,7 +36,10 @@ class MapOptimizer
     sensor_msgs::PointCloudPtr loadLaserScan(const std::string& scan_file);
     //ros parameters
     std::string mapdata_folder_;
+    std::string poseFile_;
     std::string baseFrame_;
+    std::string fixedFrame_;
+    boost::shared_ptr< tf::TransformListener > tflistener_;
     //mapping trajectory
     TNode* node_;
     std::map< int, sensor_msgs::PointCloudPtr > scans_buf_;
@@ -44,6 +48,7 @@ class MapOptimizer
     std::vector<int> id_buf_;
     std::vector<int> const_id_buf_;
     std::vector<int> ref_id_buf_;
+//    std::vector< GraphManager::OdomPose > fixed_node_buf_;
     int totle_size_;
     //deal selection
     unsigned char sel_mode;
@@ -53,6 +58,7 @@ class MapOptimizer
     void makeSE2Marker(const tf::Transform& t);
     void processMarkerFeedback( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback );
     void updateTargetLaserPose(const tf::Transform& t, int ind);
+
     int target_pose_index_;
     tf::Transform target_tf_;
     // menu handler
@@ -65,6 +71,7 @@ class MapOptimizer
     void initMenu(const tf::Transform& t);
     void menuModeCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
     void menuAddConstCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
+    void menuAddFixedConstCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
     void menuRefineCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
     void menuExportOptPosesCB(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
     //
@@ -82,6 +89,7 @@ class MapOptimizer
     boost::shared_ptr< GraphManager > graph_manager_;
     void createGraph();
     void addConstraint(const tf::Transform& newPose, int id);
+    void addFixedConstraint(const tf::Transform& newPose, int id);
     void optimize();
     int findNearestRefId(int tid);
     ros::Publisher opt_poses_pub_;
