@@ -305,7 +305,7 @@ void MapOptimizer::loadMapData() {
 		ROS_INFO("Empty map data folder!");
 		return;
 	}
-	std::string pose_file(mapdata_folder_ + "/pose.csv");
+	std::string pose_file(mapdata_folder_ + poseFile_);
 
 	ROS_INFO("MapOptimizer::loadMapData: %s", pose_file.c_str());
 	std::ifstream pose_stream(pose_file.c_str());
